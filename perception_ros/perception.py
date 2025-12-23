@@ -27,16 +27,16 @@ device = "cpu"
 class Perception(Node):
     
  
-    def __init__(self,trained_model = "/home/ubuntu/workspace/ros2_ws/src/perception_ros/Perception/model.pt"):
+    def __init__(self,trained_model = "/home/ubuntu/workspace/ros2_ws/src/perception_ros/Perception/epoch_21.pt"):
         super().__init__('Perception')
         self.image_subscription = self.create_subscription(
             Image,
-            '/sac/sensors/front_camera/image', #You can change this topic to your image topic
+            '/oakd/rgb/image_raw', #You can change this topic to your image topic
             self.image_callback,
             10)
         self.pose_publisher = self.create_publisher(
             PoseStamped,
-            'pose_msg', 
+            '/pose_msg', 
             10                 
         )
 
@@ -51,10 +51,15 @@ class Perception(Node):
         self.model.load_state_dict(save_dict["model"])
         self.model.eval()
         self.pose_msg = PoseStamped()
+
+        self.left_fb = False
+        self.right_fb = False
         
 
 
     def calculate_path(self,current_frame,pred):
+        self.left_fb = False
+        self.right_fb = False
         (h,w) = pred.shape
         left = pred[:,:w//2]
         right = pred[:,w//2:]
@@ -69,10 +74,12 @@ class Perception(Node):
                     continue
                 sum_horizontal += left[i,j]*j
                 sum_l += 1
+
         if(sum_l != 0):
             left_middle = sum_horizontal/sum_l
         else:
             left_middle = 0
+            self.left_fb = True
 
         (r_h,r_w) = right.shape
         sum_horizontal = 0
@@ -88,12 +95,14 @@ class Perception(Node):
             right_middle = w//2 + sum_horizontal/sum_l
         else:
             right_middle = w-1
+            self.right_fb = True
+
+        if self.left_fb and self.right_fb:
+            return
 
         middle = (right_middle + left_middle)/2
 
         watch_pixel = 160
-
-
 
         current_frame = cv2.resize(current_frame,(w,h),cv2.INTER_AREA)
 
@@ -123,11 +132,9 @@ class Perception(Node):
 
         self.transform_and_publish_pose(self.pose_msg)
 
-
-
     def image_callback(self,msg : Image):
-        
-        current_frame = self.br.imgmsg_to_cv2(msg,desired_encoding="bgr8")
+        rgb = self.br.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+        current_frame = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
         pred = evaluate(self.model,current_frame)
         self.calculate_path(current_frame,pred)
     
@@ -150,7 +157,7 @@ class Perception(Node):
             )
             return
         
-        self.pose_publisher.publish(self.pose_msg)
+        self.pose_publisher.publish(pose_msg)
 
         
  
